@@ -8,8 +8,8 @@
  * @version  V0.0.1
  * @date  2022-11-09
  */
-#ifndef _UNIT_4RELAY_H_
-#define _UNIT_4RELAY_H_
+#ifndef _UNIT_4_RELAY_H_
+#define _UNIT_4_RELAY_H_
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,16 +17,16 @@ extern "C" {
 
 #include <esp_err.h>
 
-#define UNIT_4RELAY_ADDR      0x26
-#define UNIT_4RELAY_REG_MODE  0x10
-#define UNIT_4RELAY_REG_RELAY 0x11
+#define UNIT_4_RELAY_ADDR      0x26
+#define UNIT_4_RELAY_REG_MODE  0x10
+#define UNIT_4_RELAY_REG_RELAY 0x11
 
 /** 
  * @brief Initialize the mode of the unit and turn off all relays.
  * 
  * In asynchronous mode, the LEDs are controlled independently of the relay states. Meaning 
  * the relay can be closed (on) and the LED will not change without setting the state of 
- * that specific LED channel to turn on using @ref unit_4relay_led_set.
+ * that specific LED channel to turn on using @ref unit_4_relay_led_set.
  * 
  * In synchronous mode, the LEDs will switch with the relay being switched either on or off. 
  * The LEDs cannot be controlled independently.
@@ -36,7 +36,7 @@ extern "C" {
  *  - ESP_OK                : Success
  *  - ESP_ERR_INVALID_ARG	: Driver parameter error
  */
-esp_err_t unit_4relay_init( bool mode );
+esp_err_t unit_4_relay_init( bool mode );
 
 /** 
  * @brief Set the on/off state of the specified relay.
@@ -46,7 +46,7 @@ esp_err_t unit_4relay_init( bool mode );
  *  - ESP_OK                : Success
  *  - ESP_ERR_INVALID_ARG	: Driver parameter error
  */
-esp_err_t unit_4relay_relay_set( uint8_t channel, bool state );
+esp_err_t unit_4_relay_relay_set( uint8_t channel, bool state );
 
 /** 
  * @brief Set the on/off state of the specified LED.
@@ -56,7 +56,7 @@ esp_err_t unit_4relay_relay_set( uint8_t channel, bool state );
  *  - ESP_OK                : Success
  *  - ESP_ERR_INVALID_ARG	: Driver parameter error
  */
-esp_err_t unit_4relay_led_set( uint8_t channel, bool state );
+esp_err_t unit_4_relay_led_set( uint8_t channel, bool state );
 
 /** 
  * @brief Set all the relay channels to the same state.
@@ -65,7 +65,7 @@ esp_err_t unit_4relay_led_set( uint8_t channel, bool state );
  *  - ESP_OK                : Success
  *  - ESP_ERR_INVALID_ARG	: Driver parameter error
  */
-esp_err_t unit_4relay_relay_all( bool state );
+esp_err_t unit_4_relay_relay_all( bool state );
 
 /** 
  * @brief Set the mode of the unit.
@@ -74,7 +74,7 @@ esp_err_t unit_4relay_relay_all( bool state );
  *  - ESP_OK                : Success
  *  - ESP_ERR_INVALID_ARG	: Driver parameter error
  */
-esp_err_t unit_4relay_mode_set( bool *mode );
+esp_err_t unit_4_relay_mode_set( bool *mode );
 
 #ifdef __cplusplus
 }
