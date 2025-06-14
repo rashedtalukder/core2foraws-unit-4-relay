@@ -32,6 +32,7 @@ extern "C"
 #endif
 
 #include <esp_err.h>
+#include <stdbool.h>
 
 #define UNIT_4_RELAY_ADDR      0x26
 #define UNIT_4_RELAY_REG_MODE  0x10

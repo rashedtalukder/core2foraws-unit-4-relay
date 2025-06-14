@@ -26,7 +26,6 @@
 #include "unit_4_relay.h"
 #include "core2foraws.h"
 #include <esp_log.h>
-#include <stdbool.h>
 #include <stdio.h>
 
 static const char *_TAG = "UNIT_4_RELAY";
