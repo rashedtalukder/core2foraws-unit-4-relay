@@ -1,7 +1,15 @@
 cmake_minimum_required( VERSION 3.16.0 )
 
-set( COMPONENT_SRCDIRS . )
-set( COMPONENT_ADD_INCLUDEDIRS "./include" )
-set( COMPONENT_REQUIRES "Core2-for-AWS-IoT-Kit")
+set( requires "Core2-for-AWS-IoT-Kit" )
+set( include_dirs "./include" )
 
-register_component()
+if( CONFIG_UNIT_4_RELAY_USE_PAHUB )
+    list( APPEND requires "core2foraws-unit-pahub" )
+    list( APPEND include_dirs "../core2foraws-unit-pahub/include" )
+endif()
+
+idf_component_register(
+    SRCS "unit_4_relay.c"
+    INCLUDE_DIRS ${include_dirs}
+    REQUIRES ${requires}
+)

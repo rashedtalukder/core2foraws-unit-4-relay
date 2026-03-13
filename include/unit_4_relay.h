@@ -19,8 +19,8 @@
  * TODO: Return a fail for attempting to change LED in sync mode
  *
  * @Links [4-Relay](https://docs.m5stack.com/en/unit/4relay)
- * @version  V0.0.2
- * @date  2023-12-11
+ * @version  V0.0.3
+ * @date  2024-01-20
  */
 
 #ifndef _UNIT_4_RELAY_H_
@@ -34,9 +34,10 @@ extern "C"
 #include <esp_err.h>
 #include <stdbool.h>
 
-#define UNIT_4_RELAY_ADDR      0x26
-#define UNIT_4_RELAY_REG_MODE  0x10
-#define UNIT_4_RELAY_REG_RELAY 0x11
+#define UNIT_4_RELAY_ADDR           0x26
+#define UNIT_4_RELAY_REG_MODE       0x10
+#define UNIT_4_RELAY_REG_RELAY      0x11
+#define UNIT_4_RELAY_LED_BIT_OFFSET 4
 
 /**
  * @brief Enable the LEDs and relays to be controlled individually.
@@ -50,12 +51,11 @@ extern "C"
 #define UNIT_4_RELAY_MODE_ASYNC 0
 
 /**
- * @brief Enable the LEDs and relays to be controlled individually.
+ * @brief Enable the LEDs to automatically follow relay states.
  *
- * In asynchronous mode, the LEDs are controlled independently of the relay
- * states. Meaning the relay can be closed (on) and the LED will not change
- * without setting the state of that specific LED channel to turn on using @ref
- * unit_4_relay_led_set.
+ * In synchronous mode, the LED for each channel mirrors the relay state.
+ * Turning a relay on will also turn its LED on, and vice versa.
+ * LED control functions have no effect in this mode.
  *
  */
 #define UNIT_4_RELAY_MODE_SYNC 1
@@ -78,6 +78,13 @@ extern "C"
    *  - ESP_ERR_INVALID_ARG	: Driver parameter error
    */
   esp_err_t unit_4_relay_init( bool mode );
+
+  /**
+   * @brief Deinitialize the 4-Relay Unit
+   *
+   * @return esp_err_t ESP_OK on success
+   */
+  esp_err_t unit_4_relay_deinit( void );
 
   /**
    * @brief Get the on/off state of the specified relay.
@@ -135,13 +142,41 @@ extern "C"
 
   /**
    * @brief Set the mode of the unit.
-   * @param async_mode Async = 0, Sync = 1.
+   * @param mode UNIT_4_RELAY_MODE_ASYNC (0) or UNIT_4_RELAY_MODE_SYNC (1).
    * @return
    * [esp_err_t](https://docs.espressif.com/projects/esp-idf/en/release-v4.3/esp32/api-reference/system/esp_err.html#macros).
    *  - ESP_OK                : Success
-   *  - ESP_ERR_INVALID_ARG	: Driver parameter error
+   *  - ESP_ERR_INVALID_STATE : Unit not initialized
    */
-  esp_err_t unit_4_relay_mode_set( bool *async_mode );
+  esp_err_t unit_4_relay_mode_set( bool mode );
+
+  /**
+   * @brief Get the current mode of the unit.
+   * @param mode Pointer to store the current mode (0 = async, 1 = sync).
+   * @return
+   * [esp_err_t](https://docs.espressif.com/projects/esp-idf/en/release-v4.3/esp32/api-reference/system/esp_err.html#macros).
+   *  - ESP_OK                : Success
+   *  - ESP_ERR_INVALID_ARG   : NULL pointer
+   *  - ESP_ERR_INVALID_STATE : Unit not initialized
+   */
+  esp_err_t unit_4_relay_mode_get( bool *mode );
+
+  /**
+   * @brief Set all the LEDs to the same state (async mode only).
+   * @param state OFF = 0, ON = 1.
+   * @return
+   * [esp_err_t](https://docs.espressif.com/projects/esp-idf/en/release-v4.3/esp32/api-reference/system/esp_err.html#macros).
+   *  - ESP_OK                : Success
+   *  - ESP_ERR_INVALID_STATE : Unit not initialized
+   */
+  esp_err_t unit_4_relay_led_all( bool state );
+
+  /**
+   * @brief Check if 4-Relay Unit is properly connected
+   *
+   * @return esp_err_t ESP_OK if unit responds
+   */
+  esp_err_t unit_4_relay_check_connection( void );
 
 #ifdef __cplusplus
 }

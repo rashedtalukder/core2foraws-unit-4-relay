@@ -1,0 +1,19 @@
+menu "Unit 4-Relay Configuration"
+
+    config UNIT_4_RELAY_USE_PAHUB
+        bool "Use PA Hub for 4-Relay Unit"
+        default n
+        help
+            Enable this option if the 4-Relay Unit is connected through a PA Hub.
+            When enabled, the unit will use PA Hub I2C communication instead of
+            direct Core2 expansion ports.
+
+    config UNIT_4_RELAY_PAHUB_CHANNEL
+        int "PA Hub Channel for 4-Relay Unit"
+        depends on UNIT_4_RELAY_USE_PAHUB
+        range 0 5
+        default 0
+        help
+            PA Hub channel number (0-5) where the 4-Relay Unit is connected.
+
+endmenu

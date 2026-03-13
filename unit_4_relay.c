@@ -19,14 +19,18 @@
  * TODO: Return a fail for attempting to change LED in sync mode
  *
  * @Links [4-Relay](https://docs.m5stack.com/en/unit/4relay)
- * @version  V0.0.2
- * @date  2023-12-11
+ * @version  V0.0.3
+ * @date  2024-01-20
  */
 
 #include "unit_4_relay.h"
 #include "core2foraws.h"
 #include <esp_log.h>
 #include <stdio.h>
+
+#ifdef CONFIG_UNIT_4_RELAY_USE_PAHUB
+#include "unit_pahub.h"
+#endif
 
 static const char *_TAG = "UNIT_4_RELAY";
 
@@ -37,38 +41,155 @@ static const char *_TAG = "UNIT_4_RELAY";
       ( ( byte ) & 0x08 ? '1' : '0' ), ( ( byte ) & 0x04 ? '1' : '0' ),        \
       ( ( byte ) & 0x02 ? '1' : '0' ), ( ( byte ) & 0x01 ? '1' : '0' )
 
+// Static variables
+static bool _initialized = false;
+static i2c_master_dev_handle_t _relay_dev = NULL;
+
+// I2C communication functions
+static esp_err_t _write_i2c( uint8_t reg, const uint8_t *data, size_t len )
+{
+#ifdef CONFIG_UNIT_4_RELAY_USE_PAHUB
+  return unit_pahub_i2c_write( CONFIG_UNIT_4_RELAY_PAHUB_CHANNEL,
+                               _relay_dev, reg, data, len );
+#else
+  return core2foraws_expports_i2c_write( _relay_dev, reg, data, len );
+#endif
+}
+
+static esp_err_t _read_i2c( uint8_t reg, uint8_t *data, size_t len )
+{
+#ifdef CONFIG_UNIT_4_RELAY_USE_PAHUB
+  return unit_pahub_i2c_read( CONFIG_UNIT_4_RELAY_PAHUB_CHANNEL,
+                              _relay_dev, reg, data, len );
+#else
+  return core2foraws_expports_i2c_read( _relay_dev, reg, data, len );
+#endif
+}
+
 esp_err_t unit_4_relay_init( bool mode )
 {
   ESP_LOGD( _TAG, "Initializing" );
-  esp_err_t err = unit_4_relay_mode_set( &mode );
-  return err |= unit_4_relay_relay_all( 0 );
+
+  if( _initialized )
+  {
+    ESP_LOGW( _TAG, "Already initialized" );
+    return ESP_OK;
+  }
+
+#ifdef CONFIG_UNIT_4_RELAY_USE_PAHUB
+  esp_err_t ret = unit_pahub_init();
+  if( ret != ESP_OK )
+  {
+    ESP_LOGE( _TAG, "PA Hub initialization failed: %s",
+              esp_err_to_name( ret ) );
+    return ret;
+  }
+
+  ret = unit_pahub_channel_set( CONFIG_UNIT_4_RELAY_PAHUB_CHANNEL );
+  if( ret != ESP_OK )
+  {
+    ESP_LOGE( _TAG, "PA Hub channel set failed: %s", esp_err_to_name( ret ) );
+    return ret;
+  }
+#endif
+
+  esp_err_t err = core2foraws_expports_i2c_device_add( UNIT_4_RELAY_ADDR, 100000, &_relay_dev );
+  if( err != ESP_OK )
+  {
+    ESP_LOGE( _TAG, "Failed to add 4-relay I2C device: %s", esp_err_to_name( err ) );
+    return err;
+  }
+
+  // Set mode directly without checking _initialized
+  ESP_LOGD( _TAG, "Setting mode to %s mode.",
+            mode ? "synchronous" : "asynchronous" );
+  err =
+      _write_i2c( UNIT_4_RELAY_REG_MODE, (const uint8_t *)&mode, 1 );
+  if( err != ESP_OK )
+  {
+    ESP_LOGE( _TAG, "Failed to set mode: %s", esp_err_to_name( err ) );
+    return err;
+  }
+
+  // Turn off all relays
+  uint8_t new_state = 0x00;
+  err = _write_i2c( UNIT_4_RELAY_REG_RELAY, &new_state, 1 );
+  if( err != ESP_OK )
+  {
+    ESP_LOGE( _TAG, "Failed to reset relays: %s", esp_err_to_name( err ) );
+    return err;
+  }
+
+  _initialized = true;
+  ESP_LOGI( _TAG, "4-Relay Unit initialized successfully" );
+  return ESP_OK;
+}
+
+esp_err_t unit_4_relay_deinit( void )
+{
+  if( !_initialized )
+  {
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  // Turn off all relays before deinitializing
+  esp_err_t ret = unit_4_relay_relay_all( 0 );
+  _initialized = false;
+  ESP_LOGI( _TAG, "4-Relay Unit deinitialized" );
+  return ret;
 }
 
 esp_err_t unit_4_relay_relay_get( uint8_t channel, bool *state )
 {
+  if( !_initialized )
+  {
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  if( channel > 3 || state == NULL )
+  {
+    return ESP_ERR_INVALID_ARG;
+  }
+
   uint8_t reg_val;
-  ESP_LOGD( _TAG, "Getting channel %d state .", channel );
-  esp_err_t err = core2foraws_expports_i2c_read(
-      UNIT_4_RELAY_ADDR, UNIT_4_RELAY_REG_RELAY, &reg_val, 1 );
+  ESP_LOGD( _TAG, "Getting channel %d state.", channel );
+  esp_err_t err = _read_i2c( UNIT_4_RELAY_REG_RELAY, &reg_val, 1 );
+  if( err != ESP_OK )
+  {
+    return err;
+  }
 
   ESP_LOGD( _TAG,
             "Received state from register (first 4 LED's last 4, "
             "relays): " BYTE_TO_BINARY_PATTERN,
             BYTE_TO_BINARY( reg_val ) );
 
-  *state = reg_val & ( 1 << channel );
-  return err;
+  *state = ( reg_val >> channel ) & 0x01;
+  return ESP_OK;
 }
 
 esp_err_t unit_4_relay_relay_set( uint8_t channel, bool state )
 {
+  if( !_initialized )
+  {
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  if( channel > 3 )
+  {
+    return ESP_ERR_INVALID_ARG;
+  }
+
   ESP_LOGD( _TAG, "Setting channel %d relay to %s.", channel,
             state ? "on" : "off" );
 
   uint8_t current_state;
 
-  core2foraws_expports_i2c_read( UNIT_4_RELAY_ADDR, UNIT_4_RELAY_REG_RELAY,
-                                 &current_state, 1 );
+  esp_err_t ret = _read_i2c( UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
+  if( ret != ESP_OK )
+  {
+    return ret;
+  }
 
   if( state == 0 )
   {
@@ -78,62 +199,182 @@ esp_err_t unit_4_relay_relay_set( uint8_t channel, bool state )
   {
     current_state |= ( 0x01 << channel );
   }
-  return core2foraws_expports_i2c_write(
-      UNIT_4_RELAY_ADDR, UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
+  return _write_i2c( UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
 }
 
 esp_err_t unit_4_relay_led_get( uint8_t channel, bool *state )
 {
+  if( !_initialized )
+  {
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  if( channel > 3 || state == NULL )
+  {
+    return ESP_ERR_INVALID_ARG;
+  }
+
   uint8_t reg_val;
-  ESP_LOGD( _TAG, "Getting channel %d state .", channel );
-  esp_err_t err = core2foraws_expports_i2c_read(
-      UNIT_4_RELAY_ADDR, UNIT_4_RELAY_REG_RELAY, &reg_val, 1 );
+  ESP_LOGD( _TAG, "Getting channel %d LED state.", channel );
+  esp_err_t err = _read_i2c( UNIT_4_RELAY_REG_RELAY, &reg_val, 1 );
+  if( err != ESP_OK )
+  {
+    return err;
+  }
 
   ESP_LOGD( _TAG,
             "Received state from register (first 4 LED's last 4, "
             "relays): " BYTE_TO_BINARY_PATTERN,
             BYTE_TO_BINARY( reg_val ) );
 
-  *state = ( reg_val >> 0x04 ) & ( 1 << channel );
-  return err;
+  *state = ( reg_val >> ( UNIT_4_RELAY_LED_BIT_OFFSET + channel ) ) & 0x01;
+  return ESP_OK;
 }
 
 esp_err_t unit_4_relay_led_set( uint8_t channel, bool state )
 {
+  if( !_initialized )
+  {
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  if( channel > 3 )
+  {
+    return ESP_ERR_INVALID_ARG;
+  }
+
   ESP_LOGD( _TAG, "Setting channel %d LED to %s.", channel,
             state ? "on" : "off" );
 
   uint8_t current_state;
 
-  core2foraws_expports_i2c_read( UNIT_4_RELAY_ADDR, UNIT_4_RELAY_REG_RELAY,
-                                 &current_state, 1 );
+  esp_err_t ret = _read_i2c( UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
+  if( ret != ESP_OK )
+  {
+    return ret;
+  }
+
+  uint8_t bit_mask = 1 << ( UNIT_4_RELAY_LED_BIT_OFFSET + channel );
 
   if( state == 0 )
   {
-    current_state &= ~( UNIT_4_RELAY_REG_MODE << channel );
+    current_state &= ~bit_mask;
   }
   else
   {
-    current_state |= ( UNIT_4_RELAY_REG_MODE << channel );
+    current_state |= bit_mask;
   }
-  return core2foraws_expports_i2c_write(
-      UNIT_4_RELAY_ADDR, UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
+  return _write_i2c( UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
 }
 
 esp_err_t unit_4_relay_relay_all( bool state )
 {
+  if( !_initialized )
+  {
+    return ESP_ERR_INVALID_STATE;
+  }
+
   ESP_LOGD( _TAG, "Setting all relays to %s.", state ? "on" : "off" );
 
-  uint8_t new_state = state * ( 0x0f );
-  return core2foraws_expports_i2c_write(
-      UNIT_4_RELAY_ADDR, UNIT_4_RELAY_REG_RELAY, &new_state, 1 );
+  // Read current register to preserve LED bits in upper nibble
+  uint8_t current_state;
+  esp_err_t ret = _read_i2c( UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
+  if( ret != ESP_OK )
+  {
+    return ret;
+  }
+
+  if( state )
+  {
+    current_state |= 0x0F;  // Set all relay bits (lower nibble)
+  }
+  else
+  {
+    current_state &= 0xF0;  // Clear all relay bits, keep LED bits
+  }
+  return _write_i2c( UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
 }
 
-esp_err_t unit_4_relay_mode_set( bool *async_mode )
+esp_err_t unit_4_relay_mode_set( bool mode )
 {
+  if( !_initialized )
+  {
+    return ESP_ERR_INVALID_STATE;
+  }
+
   ESP_LOGD( _TAG, "Setting mode to %s mode.",
-            async_mode ? "synchronous" : "asynchronous" );
-  return core2foraws_expports_i2c_write( UNIT_4_RELAY_ADDR,
-                                         UNIT_4_RELAY_REG_MODE,
-                                         (const uint8_t *)async_mode, 1 );
+            mode ? "synchronous" : "asynchronous" );
+  uint8_t val = mode ? 1 : 0;
+  return _write_i2c( UNIT_4_RELAY_REG_MODE, &val, 1 );
+}
+
+esp_err_t unit_4_relay_mode_get( bool *mode )
+{
+  if( !_initialized )
+  {
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  if( mode == NULL )
+  {
+    return ESP_ERR_INVALID_ARG;
+  }
+
+  uint8_t val;
+  esp_err_t err = _read_i2c( UNIT_4_RELAY_REG_MODE, &val, 1 );
+  if( err != ESP_OK )
+  {
+    return err;
+  }
+
+  *mode = val & 0x01;
+  return ESP_OK;
+}
+
+esp_err_t unit_4_relay_led_all( bool state )
+{
+  if( !_initialized )
+  {
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  ESP_LOGD( _TAG, "Setting all LEDs to %s.", state ? "on" : "off" );
+
+  // Read current register to preserve relay bits in lower nibble
+  uint8_t current_state;
+  esp_err_t ret = _read_i2c( UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
+  if( ret != ESP_OK )
+  {
+    return ret;
+  }
+
+  if( state )
+  {
+    current_state |= 0xF0;  // Set all LED bits (upper nibble)
+  }
+  else
+  {
+    current_state &= 0x0F;  // Clear all LED bits, keep relay bits
+  }
+  return _write_i2c( UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
+}
+
+esp_err_t unit_4_relay_check_connection( void )
+{
+  if( !_initialized )
+  {
+    return ESP_ERR_INVALID_STATE;
+  }
+
+  // Try to read the relay register to verify connection
+  uint8_t reg_val;
+  esp_err_t ret = _read_i2c( UNIT_4_RELAY_REG_RELAY, &reg_val, 1 );
+  if( ret != ESP_OK )
+  {
+    ESP_LOGE( _TAG, "4-Relay Unit connection check failed: %s",
+              esp_err_to_name( ret ) );
+    return ret;
+  }
+
+  return ESP_OK;
 }
