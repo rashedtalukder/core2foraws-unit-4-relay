@@ -19,14 +19,15 @@
  * TODO: Return a fail for attempting to change LED in sync mode
  *
  * @Links [4-Relay](https://docs.m5stack.com/en/unit/4relay)
- * @version  V0.0.3
- * @date  2024-01-20
+ * @version  V0.0.4
+ * @date  2026-06-04
  */
 
 #include "unit_4_relay.h"
 #include "core2foraws.h"
 #include <esp_log.h>
-#include <stdio.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #ifdef CONFIG_UNIT_4_RELAY_USE_PAHUB
 #include "unit_pahub.h"
@@ -97,17 +98,20 @@ esp_err_t unit_4_relay_init( bool mode )
   if( err != ESP_OK )
   {
     ESP_LOGE( _TAG, "Failed to add 4-relay I2C device: %s", esp_err_to_name( err ) );
+    _relay_dev = NULL;
     return err;
   }
 
   // Set mode directly without checking _initialized
   ESP_LOGD( _TAG, "Setting mode to %s mode.",
             mode ? "synchronous" : "asynchronous" );
-  err =
-      _write_i2c( UNIT_4_RELAY_REG_MODE, (const uint8_t *)&mode, 1 );
+  uint8_t mode_val = mode ? 1 : 0;
+  err = _write_i2c( UNIT_4_RELAY_REG_MODE, &mode_val, 1 );
   if( err != ESP_OK )
   {
     ESP_LOGE( _TAG, "Failed to set mode: %s", esp_err_to_name( err ) );
+    core2foraws_i2c_device_remove( _relay_dev );
+    _relay_dev = NULL;
     return err;
   }
 
@@ -117,6 +121,8 @@ esp_err_t unit_4_relay_init( bool mode )
   if( err != ESP_OK )
   {
     ESP_LOGE( _TAG, "Failed to reset relays: %s", esp_err_to_name( err ) );
+    core2foraws_i2c_device_remove( _relay_dev );
+    _relay_dev = NULL;
     return err;
   }
 
@@ -135,6 +141,15 @@ esp_err_t unit_4_relay_deinit( void )
   // Turn off all relays before deinitializing
   esp_err_t ret = unit_4_relay_relay_all( 0 );
   _initialized = false;
+
+  // Release the I2C device handle so a later re-init does not leak a
+  // duplicate device registration on the bus.
+  if( _relay_dev != NULL )
+  {
+    core2foraws_i2c_device_remove( _relay_dev );
+    _relay_dev = NULL;
+  }
+
   ESP_LOGI( _TAG, "4-Relay Unit deinitialized" );
   return ret;
 }
@@ -164,7 +179,7 @@ esp_err_t unit_4_relay_relay_get( uint8_t channel, bool *state )
             "relays): " BYTE_TO_BINARY_PATTERN,
             BYTE_TO_BINARY( reg_val ) );
 
-  *state = ( reg_val >> channel ) & 0x01;
+  *state = ( reg_val >> UNIT_4_RELAY_RELAY_BIT( channel ) ) & 0x01;
   return ESP_OK;
 }
 
@@ -191,15 +206,25 @@ esp_err_t unit_4_relay_relay_set( uint8_t channel, bool state )
     return ret;
   }
 
+  uint8_t bit_mask = 0x01 << UNIT_4_RELAY_RELAY_BIT( channel );
+
   if( state == 0 )
   {
-    current_state &= ~( 0x01 << channel );
+    current_state &= ~bit_mask;
   }
   else
   {
-    current_state |= ( 0x01 << channel );
+    current_state |= bit_mask;
   }
-  return _write_i2c( UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
+
+  ret = _write_i2c( UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
+  if( ret == ESP_OK )
+  {
+    // Allow the mechanical contacts to settle before returning so the
+    // caller can trust the relay state (datasheet sections 14 and 23).
+    vTaskDelay( pdMS_TO_TICKS( UNIT_4_RELAY_SETTLE_MS ) );
+  }
+  return ret;
 }
 
 esp_err_t unit_4_relay_led_get( uint8_t channel, bool *state )
@@ -227,7 +252,7 @@ esp_err_t unit_4_relay_led_get( uint8_t channel, bool *state )
             "relays): " BYTE_TO_BINARY_PATTERN,
             BYTE_TO_BINARY( reg_val ) );
 
-  *state = ( reg_val >> ( UNIT_4_RELAY_LED_BIT_OFFSET + channel ) ) & 0x01;
+  *state = ( reg_val >> UNIT_4_RELAY_LED_BIT( channel ) ) & 0x01;
   return ESP_OK;
 }
 
@@ -254,7 +279,7 @@ esp_err_t unit_4_relay_led_set( uint8_t channel, bool state )
     return ret;
   }
 
-  uint8_t bit_mask = 1 << ( UNIT_4_RELAY_LED_BIT_OFFSET + channel );
+  uint8_t bit_mask = 1 << UNIT_4_RELAY_LED_BIT( channel );
 
   if( state == 0 )
   {
@@ -292,7 +317,15 @@ esp_err_t unit_4_relay_relay_all( bool state )
   {
     current_state &= 0xF0;  // Clear all relay bits, keep LED bits
   }
-  return _write_i2c( UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
+
+  ret = _write_i2c( UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
+  if( ret == ESP_OK )
+  {
+    // Allow the mechanical contacts to settle before returning
+    // (datasheet sections 14 and 23).
+    vTaskDelay( pdMS_TO_TICKS( UNIT_4_RELAY_SETTLE_MS ) );
+  }
+  return ret;
 }
 
 esp_err_t unit_4_relay_mode_set( bool mode )
