@@ -16,8 +16,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * TODO: Return a fail for attempting to change LED in sync mode
- *
  * @Links [4-Relay](https://docs.m5stack.com/en/unit/4relay)
  * @version  V0.0.4
  * @date  2026-06-04
@@ -67,6 +65,18 @@ static esp_err_t _read_i2c( uint8_t reg, uint8_t *data, size_t len )
 #endif
 }
 
+static esp_err_t _require_manual_led_mode( void )
+{
+  uint8_t mode = 0;
+  esp_err_t err = _read_i2c( UNIT_4_RELAY_REG_MODE, &mode, 1 );
+  if( err != ESP_OK )
+  {
+    return err;
+  }
+
+  return ( mode & 0x01 ) ? ESP_ERR_INVALID_STATE : ESP_OK;
+}
+
 esp_err_t unit_4_relay_init( bool mode )
 {
   ESP_LOGD( _TAG, "Initializing" );
@@ -110,7 +120,7 @@ esp_err_t unit_4_relay_init( bool mode )
   if( err != ESP_OK )
   {
     ESP_LOGE( _TAG, "Failed to set mode: %s", esp_err_to_name( err ) );
-    core2foraws_i2c_device_remove( _relay_dev );
+    core2foraws_expports_i2c_device_remove( _relay_dev );
     _relay_dev = NULL;
     return err;
   }
@@ -121,7 +131,7 @@ esp_err_t unit_4_relay_init( bool mode )
   if( err != ESP_OK )
   {
     ESP_LOGE( _TAG, "Failed to reset relays: %s", esp_err_to_name( err ) );
-    core2foraws_i2c_device_remove( _relay_dev );
+    core2foraws_expports_i2c_device_remove( _relay_dev );
     _relay_dev = NULL;
     return err;
   }
@@ -146,7 +156,7 @@ esp_err_t unit_4_relay_deinit( void )
   // duplicate device registration on the bus.
   if( _relay_dev != NULL )
   {
-    core2foraws_i2c_device_remove( _relay_dev );
+    core2foraws_expports_i2c_device_remove( _relay_dev );
     _relay_dev = NULL;
   }
 
@@ -220,8 +230,7 @@ esp_err_t unit_4_relay_relay_set( uint8_t channel, bool state )
   ret = _write_i2c( UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
   if( ret == ESP_OK )
   {
-    // Allow the mechanical contacts to settle before returning so the
-    // caller can trust the relay state (datasheet sections 14 and 23).
+    // Apply the driver's conservative mechanical settling policy.
     vTaskDelay( pdMS_TO_TICKS( UNIT_4_RELAY_SETTLE_MS ) );
   }
   return ret;
@@ -268,12 +277,18 @@ esp_err_t unit_4_relay_led_set( uint8_t channel, bool state )
     return ESP_ERR_INVALID_ARG;
   }
 
+  esp_err_t ret = _require_manual_led_mode();
+  if( ret != ESP_OK )
+  {
+    return ret;
+  }
+
   ESP_LOGD( _TAG, "Setting channel %d LED to %s.", channel,
             state ? "on" : "off" );
 
   uint8_t current_state;
 
-  esp_err_t ret = _read_i2c( UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
+  ret = _read_i2c( UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
   if( ret != ESP_OK )
   {
     return ret;
@@ -321,8 +336,7 @@ esp_err_t unit_4_relay_relay_all( bool state )
   ret = _write_i2c( UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
   if( ret == ESP_OK )
   {
-    // Allow the mechanical contacts to settle before returning
-    // (datasheet sections 14 and 23).
+    // Apply the driver's conservative mechanical settling policy.
     vTaskDelay( pdMS_TO_TICKS( UNIT_4_RELAY_SETTLE_MS ) );
   }
   return ret;
@@ -371,11 +385,17 @@ esp_err_t unit_4_relay_led_all( bool state )
     return ESP_ERR_INVALID_STATE;
   }
 
+  esp_err_t ret = _require_manual_led_mode();
+  if( ret != ESP_OK )
+  {
+    return ret;
+  }
+
   ESP_LOGD( _TAG, "Setting all LEDs to %s.", state ? "on" : "off" );
 
   // Read current register to preserve relay bits in lower nibble
   uint8_t current_state;
-  esp_err_t ret = _read_i2c( UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
+  ret = _read_i2c( UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
   if( ret != ESP_OK )
   {
     return ret;

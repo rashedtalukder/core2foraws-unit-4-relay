@@ -1,0 +1,25 @@
+schema_version: "1.0"
+device:
+  name: "M5Stack Unit 4Relay"
+  sku: "U097"
+  scope: "Board-level relay unit, not the STM32F030F4P6 alone"
+
+source_evidence:
+  verified_on: "2026-08-01"
+  official_product_page: "https://docs.m5stack.com/en/unit/4relay"
+  board_schematic:
+    official_url: "https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/589/Sch_UNIT-4RELAY.pdf"
+    sha256_reviewed_copy: "9a395daaa081b4ec33c87b019c1665f5ceb8314b1799eba1c39e0f7c162409a8"
+    checked_in: false
+  precedence:
+    - "Use the official schematic for fitted parts and wiring."
+    - "Use the official product page for the host register protocol and published load ratings."
+    - "Treat the 15 ms driver delay as a conservative software policy, not a published module timing specification."
+
+interface:
+  type: "I2C"
+  address_7bit: 0x26
+  registers:
+    mode: 0x10
+    relay_led: 0x11
+  channels: 4

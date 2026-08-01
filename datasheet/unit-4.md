@@ -1,5 +1,11 @@
 # Unit 4Relay (SKU: U097)
 
+## Source Evidence and Precedence
+
+Verified on 2026-08-01 against the official [M5Stack product page](https://docs.m5stack.com/en/unit/4relay) and [board schematic PDF](https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/589/Sch_UNIT-4RELAY.pdf) (reviewed SHA-256 `9a395daaa081b4ec33c87b019c1665f5ceb8314b1799eba1c39e0f7c162409a8`). The product page controls the host register protocol and published load ratings; the schematic controls fitted parts and wiring. See `schema.yml` for machine-readable provenance.
+
+M5Stack does not publish module-wide operating/storage temperature limits or relay operate/release timing on this page. The driver's 15 ms post-write delay is a conservative software policy, not a claimed product specification.
+
 ## Firmware Implementation Specification
 
 ---
@@ -139,27 +145,9 @@ The circuit contains a **XC6206 low-dropout regulator** producing the internal M
 
 ---
 
-## Operating Temperature
+## Published Board Limits
 
-Typical operating temperature range:
-
-| Parameter             | Value          |
-| --------------------- | -------------- |
-| Operating Temperature | -20°C to +70°C |
-
----
-
-# 4. Absolute Maximum Ratings
-
-| Parameter                   | Limit          |
-| --------------------------- | -------------- |
-| Supply voltage              | 5.5V           |
-| Relay contact voltage       | 250VAC         |
-| Relay contact current       | 10A continuous |
-| Relay instantaneous current | 16A            |
-| Storage temperature         | -40°C to +85°C |
-
-Operation outside these limits may cause permanent damage.
+M5Stack publishes a nominal 5 V input, 250 VAC or 28 VDC maximum switched voltage, 10 A rated current, and 16 A maximum instantaneous current. Do not substitute bare MCU or relay-package limits for module-level ratings.
 
 ---
 
@@ -178,19 +166,7 @@ Operation outside these limits may cause permanent damage.
 
 ## Relay Output Terminals
 
-Each relay exposes a **4-pin screw terminal connector**.
-
-Relay terminals correspond to the mechanical relay contacts.
-
-Typical relay contact configuration:
-
-| Contact | Function        |
-| ------- | --------------- |
-| COM     | Common contact  |
-| NO      | Normally open   |
-| NC      | Normally closed |
-
-Relay contacts are electrically isolated from control circuitry.
+Each channel uses a four-position terminal block. The official schematic does not label those positions as COM/NO/NC, so firmware documentation must not infer an SPDT terminal assignment. Follow the enclosure markings and official schematic when wiring loads.
 
 ---
 
@@ -420,14 +396,7 @@ Little-endian (single byte).
 
 # 14. Timing Requirements
 
-Typical relay switching delay:
-
-| Parameter             | Value  |
-| --------------------- | ------ |
-| Relay activation time | ~10 ms |
-| Relay release time    | ~5 ms  |
-
-Firmware should allow **≥10 ms delay** after switching state before assuming contact state.
+The official unit documentation does not publish contact operate/release timing. This driver waits **15 ms** after a successful relay write as a conservative settling policy. Applications that require certified timing or contact feedback need external verification.
 
 ---
 
@@ -447,7 +416,7 @@ LED control bits are ignored.
 
 # 16. Reset Behavior
 
-Power-on reset state:
+The driver establishes this state during initialization instead of relying on undocumented MCU firmware power-on defaults:
 
 | Register      | Value |
 | ------------- | ----- |
@@ -543,7 +512,7 @@ struct relay_device_state
 
 1. Always preserve reserved bits.
 2. Do not toggle relay faster than mechanical limits.
-3. Allow ≥10 ms relay switching delay.
+3. Apply a conservative contact-settling delay appropriate to the application.
 4. Perform read-modify-write operations.
 5. Ensure correct I2C address (0x26).
 6. Avoid simultaneous large load switching.

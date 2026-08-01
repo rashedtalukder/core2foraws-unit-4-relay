@@ -16,8 +16,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  *
- * TODO: Return a fail for attempting to change LED in sync mode
- *
  * @Links [4-Relay](https://docs.m5stack.com/en/unit/4relay)
  * @version  V0.0.4
  * @date  2026-06-04
@@ -58,10 +56,9 @@ extern "C"
   ( UNIT_4_RELAY_LED_BIT_OFFSET + 3 - ( channel ) )
 
 /*
- * Mechanical relay settle time (datasheet sections 14 and 23: activation
- * ~10 ms, release ~5 ms; >=10 ms recommended before assuming contact state).
- * The driver blocks for this long after a successful relay state change so a
- * caller can safely assume the contacts have settled on return.
+ * Conservative driver-side contact-settling delay. M5Stack does not publish
+ * module operate/release timing, so applications requiring verified timing or
+ * contact feedback must validate it externally.
  */
 #define UNIT_4_RELAY_SETTLE_MS 15
 
@@ -145,7 +142,7 @@ extern "C"
    * @param[in] state   false = OFF, true = ON.
    * @return
    *  - ESP_OK                : Success
-   *  - ESP_ERR_INVALID_STATE : Unit not initialized
+  *  - ESP_ERR_INVALID_STATE : Unit not initialized or synchronous mode active
    *  - ESP_ERR_INVALID_ARG   : channel out of range
    *  - Other                 : I2C read/write error
    */
@@ -188,7 +185,7 @@ extern "C"
    * @param[in] state false = all OFF, true = all ON.
    * @return
    *  - ESP_OK                : Success
-   *  - ESP_ERR_INVALID_STATE : Unit not initialized
+  *  - ESP_ERR_INVALID_STATE : Unit not initialized or synchronous mode active
    *  - Other                 : I2C read/write error
    */
   esp_err_t unit_4_relay_relay_all( bool state );
