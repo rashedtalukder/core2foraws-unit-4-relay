@@ -1,5 +1,25 @@
 # Unit 4Relay (SKU: U097)
 
+## 2026-09-08 Driver Audit
+
+Rechecked the official product registers and schematic fingerprint. There
+are two documented host registers, `0x10` and `0x11`; no firmware command
+changes the I2C address, contact ratings or mechanical timing. The API covers
+per-channel/all relay and LED controls, mode read/write, connection checking,
+initialization and teardown.
+
+API channel 0 is silkscreen Relay 1: relay bits are `3,2,1,0`, corresponding
+LED bits `7,6,5,4`. Manual LED writes reject automatic/synchronous mode.
+Read-modify-write operations preserve the other nibble. All driver calls use
+a bounded recursive mutex retained across deinit/reinit, avoiding deletion
+of a lock with waiting callers.
+
+Deinit must successfully turn off relays before removing the I2C device.
+Off/write/removal errors retain resources for retry; errors are not proof
+that contacts are open. The 15 ms settling policy is a software minimum
+rounded conservatively for RTOS tick phase. There is no contact feedback
+input in this protocol. Host tests cannot qualify isolation or load switching.
+
 ## Source Evidence and Precedence
 
 Verified on 2026-08-01 against the official [M5Stack product page](https://docs.m5stack.com/en/unit/4relay) and [board schematic PDF](https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/589/Sch_UNIT-4RELAY.pdf) (reviewed SHA-256 `9a395daaa081b4ec33c87b019c1665f5ceb8314b1799eba1c39e0f7c162409a8`). The product page controls the host register protocol and published load ratings; the schematic controls fitted parts and wiring. See `schema.yml` for machine-readable provenance.

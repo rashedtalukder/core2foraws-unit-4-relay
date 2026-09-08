@@ -26,6 +26,8 @@
 #include <esp_log.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <freertos/semphr.h>
+#include <stdatomic.h>
 
 #ifdef CONFIG_UNIT_4_RELAY_USE_PAHUB
 #include "unit_pahub.h"
@@ -43,6 +45,20 @@ static const char *_TAG = "UNIT_4_RELAY";
 // Static variables
 static bool _initialized = false;
 static i2c_master_dev_handle_t _relay_dev = NULL;
+static _Atomic(SemaphoreHandle_t) _relay_mutex;
+
+static SemaphoreHandle_t _relay_mutex_get( void )
+{
+  SemaphoreHandle_t mutex = atomic_load(&_relay_mutex);
+  if( mutex == NULL )
+  {
+    SemaphoreHandle_t candidate = xSemaphoreCreateRecursiveMutex();
+    if( candidate == NULL ) return NULL;
+    if( atomic_compare_exchange_strong(&_relay_mutex, &mutex, candidate) ) mutex = candidate;
+    else vSemaphoreDelete(candidate);
+  }
+  return mutex;
+}
 
 // I2C communication functions
 static esp_err_t _write_i2c( uint8_t reg, const uint8_t *data, size_t len )
@@ -77,7 +93,7 @@ static esp_err_t _require_manual_led_mode( void )
   return ( mode & 0x01 ) ? ESP_ERR_INVALID_STATE : ESP_OK;
 }
 
-esp_err_t unit_4_relay_init( bool mode )
+static esp_err_t _relay_init( bool mode )
 {
   ESP_LOGD( _TAG, "Initializing" );
 
@@ -85,6 +101,13 @@ esp_err_t unit_4_relay_init( bool mode )
   {
     ESP_LOGW( _TAG, "Already initialized" );
     return ESP_OK;
+  }
+
+  if( _relay_dev != NULL )
+  {
+    esp_err_t err = core2foraws_expports_i2c_device_remove( _relay_dev );
+    if( err != ESP_OK ) return err;
+    _relay_dev = NULL;
   }
 
 #ifdef CONFIG_UNIT_4_RELAY_USE_PAHUB
@@ -120,8 +143,8 @@ esp_err_t unit_4_relay_init( bool mode )
   if( err != ESP_OK )
   {
     ESP_LOGE( _TAG, "Failed to set mode: %s", esp_err_to_name( err ) );
-    core2foraws_expports_i2c_device_remove( _relay_dev );
-    _relay_dev = NULL;
+    if( core2foraws_expports_i2c_device_remove( _relay_dev ) == ESP_OK )
+      _relay_dev = NULL;
     return err;
   }
 
@@ -131,8 +154,8 @@ esp_err_t unit_4_relay_init( bool mode )
   if( err != ESP_OK )
   {
     ESP_LOGE( _TAG, "Failed to reset relays: %s", esp_err_to_name( err ) );
-    core2foraws_expports_i2c_device_remove( _relay_dev );
-    _relay_dev = NULL;
+    if( core2foraws_expports_i2c_device_remove( _relay_dev ) == ESP_OK )
+      _relay_dev = NULL;
     return err;
   }
 
@@ -141,7 +164,7 @@ esp_err_t unit_4_relay_init( bool mode )
   return ESP_OK;
 }
 
-esp_err_t unit_4_relay_deinit( void )
+static esp_err_t _relay_deinit( void )
 {
   if( !_initialized )
   {
@@ -150,21 +173,23 @@ esp_err_t unit_4_relay_deinit( void )
 
   // Turn off all relays before deinitializing
   esp_err_t ret = unit_4_relay_relay_all( 0 );
-  _initialized = false;
+  if( ret != ESP_OK ) return ret;
 
   // Release the I2C device handle so a later re-init does not leak a
   // duplicate device registration on the bus.
   if( _relay_dev != NULL )
   {
-    core2foraws_expports_i2c_device_remove( _relay_dev );
+    ret = core2foraws_expports_i2c_device_remove( _relay_dev );
+    if( ret != ESP_OK ) return ret;
     _relay_dev = NULL;
   }
 
+  _initialized = false;
   ESP_LOGI( _TAG, "4-Relay Unit deinitialized" );
   return ret;
 }
 
-esp_err_t unit_4_relay_relay_get( uint8_t channel, bool *state )
+static esp_err_t _relay_relay_get( uint8_t channel, bool *state )
 {
   if( !_initialized )
   {
@@ -193,7 +218,7 @@ esp_err_t unit_4_relay_relay_get( uint8_t channel, bool *state )
   return ESP_OK;
 }
 
-esp_err_t unit_4_relay_relay_set( uint8_t channel, bool state )
+static esp_err_t _relay_relay_set( uint8_t channel, bool state )
 {
   if( !_initialized )
   {
@@ -231,12 +256,12 @@ esp_err_t unit_4_relay_relay_set( uint8_t channel, bool state )
   if( ret == ESP_OK )
   {
     // Apply the driver's conservative mechanical settling policy.
-    vTaskDelay( pdMS_TO_TICKS( UNIT_4_RELAY_SETTLE_MS ) );
+    vTaskDelay( pdMS_TO_TICKS( UNIT_4_RELAY_SETTLE_MS + portTICK_PERIOD_MS - 1 ) + 1 );
   }
   return ret;
 }
 
-esp_err_t unit_4_relay_led_get( uint8_t channel, bool *state )
+static esp_err_t _relay_led_get( uint8_t channel, bool *state )
 {
   if( !_initialized )
   {
@@ -265,7 +290,7 @@ esp_err_t unit_4_relay_led_get( uint8_t channel, bool *state )
   return ESP_OK;
 }
 
-esp_err_t unit_4_relay_led_set( uint8_t channel, bool state )
+static esp_err_t _relay_led_set( uint8_t channel, bool state )
 {
   if( !_initialized )
   {
@@ -307,7 +332,7 @@ esp_err_t unit_4_relay_led_set( uint8_t channel, bool state )
   return _write_i2c( UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
 }
 
-esp_err_t unit_4_relay_relay_all( bool state )
+static esp_err_t _relay_relay_all( bool state )
 {
   if( !_initialized )
   {
@@ -337,12 +362,12 @@ esp_err_t unit_4_relay_relay_all( bool state )
   if( ret == ESP_OK )
   {
     // Apply the driver's conservative mechanical settling policy.
-    vTaskDelay( pdMS_TO_TICKS( UNIT_4_RELAY_SETTLE_MS ) );
+    vTaskDelay( pdMS_TO_TICKS( UNIT_4_RELAY_SETTLE_MS + portTICK_PERIOD_MS - 1 ) + 1 );
   }
   return ret;
 }
 
-esp_err_t unit_4_relay_mode_set( bool mode )
+static esp_err_t _relay_mode_set( bool mode )
 {
   if( !_initialized )
   {
@@ -355,7 +380,7 @@ esp_err_t unit_4_relay_mode_set( bool mode )
   return _write_i2c( UNIT_4_RELAY_REG_MODE, &val, 1 );
 }
 
-esp_err_t unit_4_relay_mode_get( bool *mode )
+static esp_err_t _relay_mode_get( bool *mode )
 {
   if( !_initialized )
   {
@@ -378,7 +403,7 @@ esp_err_t unit_4_relay_mode_get( bool *mode )
   return ESP_OK;
 }
 
-esp_err_t unit_4_relay_led_all( bool state )
+static esp_err_t _relay_led_all( bool state )
 {
   if( !_initialized )
   {
@@ -412,7 +437,7 @@ esp_err_t unit_4_relay_led_all( bool state )
   return _write_i2c( UNIT_4_RELAY_REG_RELAY, &current_state, 1 );
 }
 
-esp_err_t unit_4_relay_check_connection( void )
+static esp_err_t _relay_check_connection( void )
 {
   if( !_initialized )
   {
@@ -431,3 +456,27 @@ esp_err_t unit_4_relay_check_connection( void )
 
   return ESP_OK;
 }
+
+#define RELAY_API(name, declaration, arguments) \
+  esp_err_t unit_4_relay_##name declaration \
+  { \
+    SemaphoreHandle_t mutex = _relay_mutex_get(); \
+    if( mutex == NULL ) return ESP_ERR_NO_MEM; \
+    if( xSemaphoreTakeRecursive(mutex, pdMS_TO_TICKS(1000)) != pdTRUE ) return ESP_ERR_TIMEOUT; \
+    esp_err_t err = _relay_##name arguments; \
+    xSemaphoreGiveRecursive(mutex); \
+    return err; \
+  }
+
+RELAY_API(init, (bool mode), (mode))
+RELAY_API(deinit, (void), ())
+RELAY_API(relay_get, (uint8_t channel, bool *state), (channel, state))
+RELAY_API(relay_set, (uint8_t channel, bool state), (channel, state))
+RELAY_API(led_get, (uint8_t channel, bool *state), (channel, state))
+RELAY_API(led_set, (uint8_t channel, bool state), (channel, state))
+RELAY_API(relay_all, (bool state), (state))
+RELAY_API(led_all, (bool state), (state))
+RELAY_API(mode_set, (bool mode), (mode))
+RELAY_API(mode_get, (bool *mode), (mode))
+RELAY_API(check_connection, (void), ())
+#undef RELAY_API
